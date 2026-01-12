@@ -32,12 +32,12 @@ namespace LangImporter
             {"fr","français"},
             {"pt_br","Português do Brasil"},
             {"pt_pt","Português"}
-        },
-        associated_paths = new Dictionary<string, string>()
-        {
-            // {key}, {path}
         };
-        public static List<string> moddedLangs = new List<string>();
+        public static Dictionary<string, string[]> associated_paths = new Dictionary<string, string[]>()
+        {
+            // {uniqkey}, {path, targetkey}
+        };
+        public static string[] moddedLangs = null;
         public static string path = null;
         public Harmony_Patch()
         {
@@ -57,10 +57,11 @@ namespace LangImporter
                         {
                             string name = doc.SelectSingleNode("langInfo/name").InnerText,
                                 key = doc.SelectSingleNode("langInfo/key").InnerText;
+                            string[] pair = {dir, key};
                             if (name == "Example(cant be used as real name)") continue;
                             if (supportedLanguages.ContainsKey(key)) key = key + $"modded{counter++}";
                             moddedLangs.Add(key, name);
-                            associated_paths.Add(key, dir);
+                            associated_paths.Add(key, pair);
                         }
                         catch { GenerateError($"LangInfo file in {'"'}{dir.Split('\\').Last()}{'"'} folder is broken or doesnt contains necessary information"); }
                     }
@@ -73,7 +74,7 @@ namespace LangImporter
                 #endregion
 
                 #region marging
-                Harmony_Patch.moddedLangs = moddedLangs.Keys.ToList();
+                Harmony_Patch.moddedLangs = moddedLangs.Keys.ToArray();
                 foreach (KeyValuePair<string, string> item in supportedLanguages)
                 {
                     try
@@ -106,8 +107,8 @@ namespace LangImporter
 
                 harmonyInstance.Patch(
                     typeof(AssetLoader).GetMethod(nameof(AssetLoader.LoadExternalXML), AccessTools.all),
-                    new HarmonyMethod(typeof(Harmony_Patch).GetMethod("AssetLoader_LoadExternalXML_Prefix")),
-                    new HarmonyMethod(typeof(Harmony_Patch).GetMethod("AssetLoader_LoadExternalXML_Postfix")),
+                    new HarmonyMethod(typeof(Harmony_Patch).GetMethod("AssetLoader_LoadExternalXML")),
+                    null,
                 null);
                 #endregion
             }
@@ -181,7 +182,7 @@ namespace LangImporter
                                     key = doc.SelectSingleNode("langInfo/key").InnerText;
 
                             doc.Load(dir + "/Text/AgentName.xml");
-                            foreach(XmlNode curr in doc.SelectNodes("root/data"))
+                            foreach (XmlNode curr in doc.SelectNodes("root/data"))
                             {
                                 orignames.MoveNext();
                                 string localizedName = null;
@@ -193,7 +194,7 @@ namespace LangImporter
 
                                 if (localizedName != null)
                                 {
-                                    if(curr.Attributes.GetNamedItem("id").InnerText != ((XmlNode)orignames.Current).Attributes.GetNamedItem("id").InnerText)
+                                    if (curr.Attributes.GetNamedItem("id").InnerText != ((XmlNode)orignames.Current).Attributes.GetNamedItem("id").InnerText)
                                         throw new Exception($"localized names have a wrong order or have a lack of all orig names in {uniqueKey} localization");
                                     XmlAttribute att = __result.CreateAttribute(uniqueKey);
                                     att.InnerText = localizedName;
@@ -207,13 +208,13 @@ namespace LangImporter
                         }
                         orignames.Reset();
                     }
-                    
+
                     IDisposable disposable;
                     if ((disposable = (orignames as IDisposable)) != null)
                     {
                         disposable.Dispose();
                     }
-                    
+
                 }
                 else if (src == "Language/ResearchDesc")
                 {
@@ -236,7 +237,7 @@ namespace LangImporter
                                     key = doc.SelectSingleNode("langInfo/key").InnerText;
 
                             doc.Load(dir + "/Text/ResearchDesc.xml");
-                            foreach(XmlNode curr in doc.SelectNodes("root/node"))
+                            foreach (XmlNode curr in doc.SelectNodes("root/node"))
                             {
                                 if (curr.Attributes.GetNamedItem("id").InnerText != ((XmlNode)orignames.Current).Attributes.GetNamedItem("id").InnerText)
                                     throw new Exception($"localized researches have a wrong order or have a lack of all orig names in {uniqueKey} localization");
@@ -254,7 +255,41 @@ namespace LangImporter
         }
 
         //GameStaticDataLoader
+        public static void GameStaticDataLoader_LoadResearchDescData(List<ResearchItemTypeInfo> research)
+        {
+            Dictionary<int, int> ids = new Dictionary<int, int>();
+            for (int i = 0; i < research.Count; i++)
+            {
+                ids.Add(research[i].id, i);
+            }
 
+            foreach (string lang in moddedLangs)
+            {
+                XmlDocument xmlDocument = new XmlDocument();
+                xmlDocument.Load(associated_paths[lang][0] + "/Text/ResearchDesc.xml");
+                foreach(XmlNode currNode in xmlDocument.SelectNodes("root/node"))
+                {
+                    try
+                    {
+                        int resID = int.Parse(currNode.Attributes.GetNamedItem("id").InnerText);
+                        Dictionary<string, ResearchItemDesc> dictionary2 = new Dictionary<string, ResearchItemDesc>();
+                        XmlNode langNode = currNode.SelectSingleNode(lang);
+                        dictionary2.Add(lang, new ResearchItemDesc
+                        {
+                            name = langNode.SelectSingleNode("name").InnerText,
+                            desc = langNode.SelectSingleNode("current").InnerText,
+                            shortDesc = langNode.SelectSingleNode("short").InnerText
+                        });
+                        dictionary[resID].Add(dictionary2);
+                    }
+                    catch (Exception e)
+                    {
+                        GenerateError("error during loading descriptions: " + e.Message);
+                        continue;
+                    }
+                }
+            }
+        }
 
 
         #endregion
